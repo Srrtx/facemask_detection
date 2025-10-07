@@ -2,6 +2,13 @@
 
 This project implements a real-time face mask detection system using a trained deep learning model and computer vision techniques.
 
+## Dataset
+# Face Mask Detection COVID-19 Dataset for training Face Mask Classifier
+The dataset has a total of 14535 images. It can be primarily used to train face mask classifiers.
+It consists of 3 classes.
+a) Incorrect mask b)With mask C) without mask.
+shiekhburhan/face-mask-dataset
+
 ## Features
 
 - Real-time face detection using MediaPipe
@@ -49,3 +56,4 @@ The model predicts three classes:
 1. **Camera not working**: Make sure your camera is not being used by another application
 2. **Model not found**: Ensure `face_mask.h5` is in the same directory as the script
 3. **Performance issues**: Try reducing the camera resolution or frame rate
+
