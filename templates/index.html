@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Mask Detection</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 30px;
+            max-width: 900px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+
+        #startBtn {
+            background: #4CAF50;
+            color: white;
+        }
+
+        #startBtn:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(76, 175, 80, 0.3);
+        }
+
+        #stopBtn {
+            background: #f44336;
+            color: white;
+        }
+
+        #stopBtn:hover {
+            background: #da190b;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(244, 67, 54, 0.3);
+        }
+
+        #stopBtn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            text-align: center;
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 20px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #061762;
+        }
+
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1> Real-time Face Mask Detection</h1>
+
+        <div class="video-container">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn">Start Camera</button>
+            <button id="stopBtn" disabled>Stop Camera</button>
+        </div>
+
+        <div id="status" class="status info">
+            Click "Start Camera" to begin detection
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="fpsValue">0</div>
+                <div class="stat-label">FPS</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="facesValue">0</div>
+                <div class="stat-label">Faces Detected</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="detectionSpeed">0ms</div>
+                <div class="stat-label">Detection Speed</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDiv = document.getElementById('status');
+        const fpsValue = document.getElementById('fpsValue');
+        const facesValue = document.getElementById('facesValue');
+        const detectionSpeedValue = document.getElementById('detectionSpeed');
+
+        let stream = null;
+        let isRunning = false;
+        let animationId = null;
+        let lastFrameTime = Date.now();
+        let lastDetectionTime = 0;
+        let fps = 0;
+        const DETECTION_INTERVAL = 300; // Detect every 300ms (3.3 FPS) instead of every frame
+
+        // Color mapping
+        const colors = {
+            'with_mask': '#00FF00',
+            'without_mask': '#FF0000',
+            'incorrect_mask': '#FFA500'
+        };
+
+        function updateStatus(message, type = 'info') {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        async function startCamera() {
+            try {
+                updateStatus('Requesting camera access...', 'info');
+
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: 'user'
+                    }
+                });
+
+                video.srcObject = stream;
+
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    isRunning = true;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    updateStatus('Camera active - Detecting masks...', 'success');
+                    processFrame();
+                };
+
+            } catch (err) {
+                console.error('Camera error:', err);
+                updateStatus(`Camera error: ${err.message}`, 'error');
+            }
+        }
+
+        function stopCamera() {
+            isRunning = false;
+
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            video.srcObject = null;
+
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            updateStatus('Camera stopped', 'info');
+            fpsValue.textContent = '0';
+            facesValue.textContent = '0';
+        }
+
+        async function processFrame() {
+            if (!isRunning) return;
+
+            // Calculate FPS
+            const now = Date.now();
+            const delta = now - lastFrameTime;
+            fps = Math.round(1000 / delta);
+            lastFrameTime = now;
+            fpsValue.textContent = fps;
+
+            // Only run detection every DETECTION_INTERVAL milliseconds for better performance
+            if (now - lastDetectionTime >= DETECTION_INTERVAL) {
+                lastDetectionTime = now;
+                const detectionStartTime = performance.now();
+
+                // Capture frame from video
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = video.videoWidth;
+                tempCanvas.height = video.videoHeight;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.drawImage(video, 0, 0);
+
+                // Convert to base64 with lower quality for faster transmission
+                const imageData = tempCanvas.toDataURL('image/jpeg', 0.7);
+
+                try {
+                    // Send to server for detection
+                    const response = await fetch('/detect', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ image: imageData })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.status === 'success') {
+                        drawDetections(data.detections);
+                        facesValue.textContent = data.detections.length;
+
+                        // Update detection speed
+                        const detectionTime = Math.round(performance.now() - detectionStartTime);
+                        detectionSpeedValue.textContent = `${detectionTime}ms`;
+                    }
+
+                } catch (err) {
+                    console.error('Detection error:', err);
+                }
+            }
+
+            // Continue processing
+            animationId = requestAnimationFrame(processFrame);
+        }
+
+        function drawDetections(detections) {
+            // Clear previous drawings
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw each detection
+            detections.forEach(det => {
+                const color = colors[det.class];
+
+                // Draw bounding box
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(det.x, det.y, det.w, det.h);
+
+                // Draw label background
+                const label = `${det.class}: ${(det.confidence * 100).toFixed(1)}%`;
+                ctx.font = 'bold 16px Arial';
+                const textMetrics = ctx.measureText(label);
+                const textHeight = 20;
+
+                ctx.fillStyle = color;
+                ctx.fillRect(det.x, det.y - textHeight - 5, textMetrics.width + 10, textHeight + 5);
+
+                // Draw label text
+                ctx.fillStyle = 'white';
+                ctx.fillText(label, det.x + 5, det.y - 8);
+            });
+        }
+
+        // Event listeners
+        startBtn.addEventListener('click', startCamera);
+        stopBtn.addEventListener('click', stopCamera);
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+
+</html>
