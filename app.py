@@ -36,13 +36,14 @@ class MaskDetector:
             raise ValueError("Error loading face cascade classifier")
         
         # Class labels and confidence thresholds
-        self.class_labels = ['with_mask', 'without_mask', 'incorrect_mask']
+        # Labels must match the order of model's output classes
+        self.class_labels = ['incorrect_mask', 'with_mask', 'without_mask']  # Updated order to match model training
         self.class_colors = {
             'with_mask': (0, 255, 0),      # Green
             'without_mask': (0, 0, 255),   # Red
             'incorrect_mask': (0, 165, 255) # Orange
         }
-        self.confidence_threshold = 0.7  # Minimum confidence for valid detection
+        self.confidence_threshold = 0.65  # Slightly lowered threshold for better detection
         
         # Performance tracking
         self.last_detection_time = 0
@@ -92,6 +93,10 @@ class MaskDetector:
             
             # Get probabilities for each class
             class_probs = predictions[0]
+            
+            # Print probabilities for debugging
+            print("Raw predictions:", {label: float(prob) for label, prob in zip(self.class_labels, class_probs)})
+            
             predicted_class_idx = np.argmax(class_probs)
             confidence = float(class_probs[predicted_class_idx])
             
@@ -101,14 +106,19 @@ class MaskDetector:
                 
             predicted_class = self.class_labels[predicted_class_idx]
             
-            # Additional validation for "with_mask" prediction
-            if predicted_class == 'with_mask':
-                # Check if "without_mask" probability is too close
-                without_mask_prob = float(class_probs[self.class_labels.index('without_mask')])
-                if confidence - without_mask_prob < 0.15:  # If difference is less than 15%
-                    return 'unknown', confidence
+            # Additional validation to ensure prediction reliability
+            second_highest_prob = np.partition(class_probs.flatten(), -2)[-2]
+            prob_difference = confidence - second_highest_prob
+            
+            # If the difference between top two predictions is too small, mark as unknown
+            if prob_difference < 0.2:  # 20% difference threshold
+                return 'unknown', confidence
                     
             return predicted_class, confidence
+            
+        except Exception as e:
+            print(f"Prediction error: {e}")
+            return 'unknown', 0.0
             
         except Exception as e:
             print(f"Prediction error: {e}")
